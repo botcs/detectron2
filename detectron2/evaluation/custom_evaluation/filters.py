@@ -8,9 +8,11 @@ Filters:
 - reusable, can be pipelined, parallelized
 
 """
-import matcher
-import assignment
 import logging
+
+import assignment
+import matcher
+
 
 def filter_size_range_inplace(gt_instances, pred_instances, min_area, max_area):
     """

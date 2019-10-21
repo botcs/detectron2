@@ -6,8 +6,10 @@ Having multiple candidate matches we would like to assign the "best" match.
 Different definitions of "best" yield different evaluation metrics.
 """
 import logging
-import matcher
+
 import filters
+import matcher
+
 
 ##################
 # ASSIGNMENT UTILS
@@ -80,5 +82,3 @@ def pred_first_conf_rank_assign_inplace(
                 gt_inst["assigned_pred"] = pred_inst["id"]
                 pred_inst["assigned_gt"] = gt_inst["id"]
                 break
-
-

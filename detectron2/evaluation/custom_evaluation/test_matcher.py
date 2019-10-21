@@ -1,8 +1,9 @@
 # coding: utf-8
 import unittest
+import torch
 
 import matcher
-import torch
+
 
 class TestCollator(unittest.TestCase):
     def test_single_object(self):
@@ -165,4 +166,3 @@ class TestMatcher(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

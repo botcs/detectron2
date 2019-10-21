@@ -1,6 +1,7 @@
 import sys
 from collections import Counter
 
+
 def naive_split(inst_count_per_img, target_size):
     """
     Args:
@@ -143,4 +144,3 @@ def split_to_chunks(gt_instances, pred_instances, size, optim=True):
     inst_count_per_img.update(
         pred_inst["image_id"] for pred_inst in pred_instances
     )
-

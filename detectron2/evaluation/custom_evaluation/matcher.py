@@ -10,11 +10,10 @@ Matcher:
 - this is universal: no shortcuts
 """
 
-import math
 import json
 import logging
+import math
 from collections import Counter, defaultdict
-
 import torch
 from tqdm import tqdm
 
@@ -393,4 +392,3 @@ def remove_inconsistent_matches_inplace(gt_instances, pred_instances, mode="both
                     )
 
             pred_inst["matched_gts"] = consistent_gt_matches
-

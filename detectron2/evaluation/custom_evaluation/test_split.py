@@ -4,6 +4,7 @@ from collections import Counter
 
 import split
 
+
 class TestSplit(unittest.TestCase):
     def test_naive_split(self):
 
@@ -78,4 +79,3 @@ class TestSplit(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

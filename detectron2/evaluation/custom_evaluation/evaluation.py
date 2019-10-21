@@ -13,15 +13,15 @@ numbers by some logic like mAP, precision-recall-curves, class confusion matrix,
 etc.
 """
 
-import matcher
-import assignment
-import torch
 import logging
-import filters
-from copy import deepcopy
 from collections import Counter
-
+from copy import deepcopy
+import torch
 from tqdm import tqdm
+
+import assignment
+import filters
+import matcher
 
 
 ############
@@ -32,6 +32,7 @@ def safety_copy(gt_instances, pred_instances):
     copied_gt_instances = deepcopy(gt_instances)
     copied_pred_instances = deepcopy(pred_instances)
     return copied_gt_instances, copied_pred_instances
+
 
 def prepare_for_eval(gt_instances, pred_instances, copy=True):
     if matcher.already_matched(gt_instances, pred_instances):
@@ -47,7 +48,13 @@ def prepare_for_eval(gt_instances, pred_instances, copy=True):
     return gt_instances, pred_instances
 
 
-
+def force_decreasing_sequence_inplace(seq):
+    min_val = seq[-1]
+    for i in range(1, len(seq)):
+        if min_val < seq[~i]:
+            min_val = seq[~i]
+        else:
+            seq[~i] = min_val
 
 ###########################
 # MAIN EVAL IMPLEMENTATIONS
@@ -330,7 +337,6 @@ def compute_F_score(prec, rec):
         p = prec[measurement_point]
         r = rec[measurement_point]
         F_score[measurement_point] = 2 * (p * r) / (p + r) if p or r else 0.
-
     return F_score
 
 
