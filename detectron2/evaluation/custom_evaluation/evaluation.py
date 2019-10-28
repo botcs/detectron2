@@ -35,9 +35,16 @@ def safety_copy(gt_instances, pred_instances):
 
 
 def prepare_for_eval(gt_instances, pred_instances, copy=True):
+    """
+    assures that the preds and GTs are matched properly and creates
+    a safety copy to prevent unwanted modifications by subsequent
+    inplace operations (optional)
+    """
     if matcher.already_matched(gt_instances, pred_instances):
         logging.info("Found cached match references, validating")
-        assert not matcher.has_inconsistent_matches(gt_instances, pred_instances)
+        assert not matcher.has_inconsistent_matches(
+            gt_instances, pred_instances
+        )
     else:
         logging.info("Matching Preds with GTs")
         matcher.compute_matches_inplace(gt_instances, pred_instances)
@@ -49,12 +56,31 @@ def prepare_for_eval(gt_instances, pred_instances, copy=True):
 
 
 def force_decreasing_sequence_inplace(seq):
+    assert len(seq) > 0
+
     min_val = seq[-1]
     for i in range(1, len(seq)):
         if min_val < seq[~i]:
             min_val = seq[~i]
         else:
             seq[~i] = min_val
+
+
+class init_eval:
+    """
+    A decorator that initializes evaluations using prepare_for_eval
+    """
+
+    def __init__(self, func):
+        self.func = func
+
+    def __call__(self, gt_instances, pred_instances, *args, **kwargs):
+        logging.info("Initializing evaluation")
+        gt_instances, pred_instances = prepare_for_eval(
+            gt_instances, pred_instances
+        )
+        return self.func(gt_instances, pred_instances, *args, **kwargs)
+
 
 ###########################
 # MAIN EVAL IMPLEMENTATIONS
@@ -76,20 +102,19 @@ def compute_prec_rec(gt_instances, pred_instances):
         if pred_inst["assigned_gt"] is None:
             fp += 1
 
-    prec = tp / (tp + fp) if tp or fp else 0.
-    rec = tp / (tp + fn) if tp or fn else 0.
+    prec = tp / (tp + fp) if tp or fp else 0.0
+    rec = tp / (tp + fn) if tp or fn else 0.0
 
     return prec, rec
 
 
+@init_eval
 def eval_prec_rec_at_conf_levels(
     gt_instances, pred_instances, conf_levels, iou_threshold
 ):
-    gt_instances, pred_instances = prepare_for_eval(gt_instances, pred_instances)
-
     filters.filter_correct_class_inplace(gt_instances, pred_instances)
     filters.filter_iou_range_inplace(
-        gt_instances, pred_instances, min_iou=iou_threshold, max_iou=1.
+        gt_instances, pred_instances, min_iou=iou_threshold, max_iou=1.0
     )
 
     precs, recs = {}, {}
@@ -100,7 +125,7 @@ def eval_prec_rec_at_conf_levels(
             f"& IoU>={iou_threshold}"
         )
         filters.filter_conf_range_inplace(
-            gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.
+            gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.0
         )
         prec, rec = compute_prec_rec(gt_instances, pred_instances)
         precs[conf_threshold] = prec
@@ -109,14 +134,13 @@ def eval_prec_rec_at_conf_levels(
     return precs, recs
 
 
+@init_eval
 def eval_prec_rec_at_iou_levels(
     gt_instances, pred_instances, conf_threshold, iou_levels
 ):
-    gt_instances, pred_instances = prepare_for_eval(gt_instances, pred_instances)
-
     filters.filter_correct_class_inplace(gt_instances, pred_instances)
     filters.filter_conf_range_inplace(
-        gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.
+        gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.0
     )
 
     precs, recs = {}, {}
@@ -127,7 +151,7 @@ def eval_prec_rec_at_iou_levels(
             f"& IoU>={iou_threshold}"
         )
         filters.filter_iou_range_inplace(
-            gt_instances, pred_instances, min_iou=iou_threshold, max_iou=1.
+            gt_instances, pred_instances, min_iou=iou_threshold, max_iou=1.0
         )
         prec, rec = compute_prec_rec(gt_instances, pred_instances)
         precs[iou_threshold] = prec
@@ -136,11 +160,10 @@ def eval_prec_rec_at_iou_levels(
     return precs, recs
 
 
+@init_eval
 def eval_prec_rec_at_iou_conf_grid(
     gt_instances, pred_instances, conf_levels, iou_levels
 ):
-    gt_instances, pred_instances = prepare_for_eval(gt_instances, pred_instances)
-
     filters.filter_correct_class_inplace(gt_instances, pred_instances)
     conf_levels.sort()
     iou_levels.sort()
@@ -150,20 +173,20 @@ def eval_prec_rec_at_iou_conf_grid(
         f"Grid evaluation @ conf[{min(conf_levels)}:{max(conf_levels)}] "
         f"& IoU[{min(iou_levels)}:{max(iou_levels)}] "
     )
-    pbar = tqdm(total=len(conf_levels)*len(iou_levels))
+    pbar = tqdm(total=len(conf_levels) * len(iou_levels))
     for conf_threshold in conf_levels:
         curr_gt_instances, curr_pred_instances = safety_copy(
             gt_instances, pred_instances
         )
         filters.filter_conf_range_inplace(
-            gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.
+            gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.0
         )
         for iou_threshold in iou_levels:
             filters.filter_iou_range_inplace(
                 curr_gt_instances,
                 curr_pred_instances,
                 min_iou=iou_threshold,
-                max_iou=1.
+                max_iou=1.0,
             )
             prec, rec = compute_prec_rec(curr_gt_instances, curr_pred_instances)
             precs[conf_threshold, iou_threshold] = prec
@@ -181,10 +204,7 @@ def eval_prec_rec_at_iou_conf_grid(
 ####################
 def compute_prec_rec_per_class(gt_instances, pred_instances):
     assignment.remove_assignments_inplace(gt_instances, pred_instances)
-    assignment.pred_first_conf_rank_assign_inplace(
-        gt_instances,
-        pred_instances,
-    )
+    assignment.pred_first_conf_rank_assign_inplace(gt_instances, pred_instances)
 
     prec, rec = {}, {}
     TP, FP, FN = Counter(), Counter(), Counter()
@@ -205,36 +225,39 @@ def compute_prec_rec_per_class(gt_instances, pred_instances):
         tp = TP[category_id]
         fp = FP[category_id]
         fn = FN[category_id]
-        prec[category_id] = tp / (tp + fp) if tp or fp else 0.
-        rec[category_id] = tp / (tp + fn) if tp or fn else 0.
+        prec[category_id] = tp / (tp + fp) if tp or fp else 0.0
+        rec[category_id] = tp / (tp + fn) if tp or fn else 0.0
 
     return prec, rec
 
 
+@init_eval
 def eval_prec_rec_per_class(
-    gt_instances, pred_instances, conf_threshold=.7, iou_threshold=.5
+    gt_instances, pred_instances, conf_threshold=0.7, iou_threshold=0.5
 ):
-    gt_instances, pred_instances = prepare_for_eval(gt_instances, pred_instances)
+    gt_instances, pred_instances = prepare_for_eval(
+        gt_instances, pred_instances
+    )
 
     filters.filter_correct_class_inplace(gt_instances, pred_instances)
     filters.filter_conf_range_inplace(
-        gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.
+        gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.0
     )
     filters.filter_iou_range_inplace(
-        gt_instances, pred_instances, min_iou=iou_threshold, max_iou=1.
+        gt_instances, pred_instances, min_iou=iou_threshold, max_iou=1.0
     )
 
     prec, rec = compute_prec_rec_per_class(gt_instances, pred_instances)
 
 
+@init_eval
 def eval_prec_rec_per_class_at_conf_levels(
-    gt_instances, pred_instances, conf_levels, iou_threshold=.5
+    gt_instances, pred_instances, conf_levels, iou_threshold=0.5
 ):
-    gt_instances, pred_instances = prepare_for_eval(gt_instances, pred_instances)
 
     filters.filter_correct_class_inplace(gt_instances, pred_instances)
     filters.filter_iou_range_inplace(
-        gt_instances, pred_instances, min_iou=iou_threshold, max_iou=1.
+        gt_instances, pred_instances, min_iou=iou_threshold, max_iou=1.0
     )
 
     precs, recs = {}, {}
@@ -245,7 +268,7 @@ def eval_prec_rec_per_class_at_conf_levels(
             f"& IoU>={iou_threshold}"
         )
         filters.filter_conf_range_inplace(
-            gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.
+            gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.0
         )
         prec, rec = compute_prec_rec_per_class(gt_instances, pred_instances)
         for category_id, prec_val in prec.items():
@@ -256,14 +279,14 @@ def eval_prec_rec_per_class_at_conf_levels(
     return precs, recs
 
 
+@init_eval
 def eval_prec_rec_per_class_at_iou_levels(
     gt_instances, pred_instances, conf_threshold, iou_levels
 ):
-    gt_instances, pred_instances = prepare_for_eval(gt_instances, pred_instances)
 
     filters.filter_correct_class_inplace(gt_instances, pred_instances)
     filters.filter_conf_range_inplace(
-        gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.
+        gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.0
     )
 
     precs, recs = {}, {}
@@ -274,21 +297,21 @@ def eval_prec_rec_per_class_at_iou_levels(
             f"& IoU>={iou_threshold}"
         )
         filters.filter_iou_range_inplace(
-            gt_instances, pred_instances, min_iou=iou_threshold, max_iou=1.
+            gt_instances, pred_instances, min_iou=iou_threshold, max_iou=1.0
         )
         prec, rec = compute_prec_rec_per_class(gt_instances, pred_instances)
         for category_id, prec_val in prec.items():
-            precs[conf_threshold, category_id] = prec_val
+            precs[iou_threshold, category_id] = prec_val
         for category_id, rec_val in rec.items():
-            recs[conf_threshold, category_id] = rec_val
+            recs[iou_threshold, category_id] = rec_val
 
     return precs, recs
 
 
+@init_eval
 def eval_prec_rec_per_class_at_iou_conf_grid(
     gt_instances, pred_instances, conf_levels, iou_levels
 ):
-    gt_instances, pred_instances = prepare_for_eval(gt_instances, pred_instances)
 
     filters.filter_correct_class_inplace(gt_instances, pred_instances)
     conf_levels.sort()
@@ -299,20 +322,20 @@ def eval_prec_rec_per_class_at_iou_conf_grid(
         f"Grid evaluation @ conf[{min(conf_levels)}:{max(conf_levels)}] "
         f"& IoU[{min(iou_levels)}:{max(iou_levels)}] "
     )
-    pbar = tqdm(total=len(conf_levels)*len(iou_levels))
+    pbar = tqdm(total=len(conf_levels) * len(iou_levels))
     for conf_threshold in conf_levels:
         curr_gt_instances, curr_pred_instances = safety_copy(
             gt_instances, pred_instances
         )
         filters.filter_conf_range_inplace(
-            gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.
+            gt_instances, pred_instances, min_conf=conf_threshold, max_conf=1.0
         )
         for iou_threshold in iou_levels:
             filters.filter_iou_range_inplace(
                 curr_gt_instances,
                 curr_pred_instances,
                 min_iou=iou_threshold,
-                max_iou=1.
+                max_iou=1.0,
             )
 
             prec, rec = compute_prec_rec_per_class(
@@ -336,22 +359,22 @@ def compute_F_score(prec, rec):
     for measurement_point in prec.keys():
         p = prec[measurement_point]
         r = rec[measurement_point]
-        F_score[measurement_point] = 2 * (p * r) / (p + r) if p or r else 0.
+        F_score[measurement_point] = 2 * (p * r) / (p + r) if p or r else 0.0
     return F_score
 
 
+@init_eval
 def eval_F_score(gt_instances, pred_instances, conf_levels):
-    # Should be omitted, since no filters/modifiers are applied
-    # gt_instances, pred_instances = prepare_for_eval(gt_instances, pred_instances)
     prec, rec = eval_prec_rec(gt_instances, pred_instances, conf_levels)
     F_score = compute_F_score(prec, rec)
     return F_score
 
 
+@init_eval
 def eval_F_score_per_class(gt_instances, pred_instances, conf_levels):
-    # Should be omitted, since no filters/modifiers are applied
-    # gt_instances, pred_instances = prepare_for_eval(gt_instances, pred_instances)
-    prec, rec = eval_prec_rec_per_class(gt_instances, pred_instances, conf_levels)
+    prec, rec = eval_prec_rec_per_class(
+        gt_instances, pred_instances, conf_levels
+    )
     F_score = compute_F_score(prec, rec)
     return F_score
 
@@ -372,9 +395,47 @@ def compute_optimal_thresholds_per_class(F_score):
     return best_fs, optimal_thresholds
 
 
+@init_eval
 def eval_optimal_F_score_per_class(gt_instances, pred_instances, conf_levels):
-    # Should be omitted, since no filters/modifiers are applied
-    # gt_instances, pred_instances = prepare_for_eval(gt_instances, pred_instances)
     F_score = eval_F_score_per_class(gt_instances, pred_instances, conf_levels)
     best_fs, optimal_thresholds = compute_optimal_thresholds_per_class(F_score)
     return best_fs, optimal_thresholds
+
+
+def compute_COCO_mAP(prec, rec):
+    # extract the measurement points
+    iou_levels, category_ids = set(), set()
+    for iou_threshold, category_id in prec.keys():
+        iou_levels.add(iou_threshold)
+        category_ids.add(category_id)
+
+    # iou ordering is important
+    iou_levels = sorted(list(iou_levels))
+    category_ids = sorted(list(category_ids))
+
+    # organize scores into tensor
+    prec_tensor = torch.zeros(len(iou_levels), len(category_ids))
+    rec_tensor = torch.zeros(len(iou_levels), len(category_ids))
+    for i, iou_threshold in enumerate(iou_levels):
+        for j, category_id in enumerate(category_ids):
+            prec_tensor[i, j] = prec[iou_threshold, category_id]
+            rec_tensor[i, j] = rec[iou_threshold, category_id]
+
+    # remove zig-zags from the precision curve
+    for j in range(len(category_ids)):
+        # this could be done simultaneously, but then the
+        # function only worked for Tensors and not generic
+        # sequences
+        force_decreasing_sequence_inplace(prec_tensor[:, j])
+
+    # compute area under curve
+    area = torch.trapz(prec, rec)
+
+
+@init_eval
+def eval_COCO_mAP(gt_instances, pred_instances, conf_threshold, iou_levels):
+    prec, rec = eval_prec_rec_per_class_at_iou_levels(
+        gt_instances, pred_instances, conf_threshold, iou_levels
+    )
+    # TODO: do the monotonity force and AUC per class
+    assert False
