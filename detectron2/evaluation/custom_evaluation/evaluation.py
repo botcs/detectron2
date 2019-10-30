@@ -14,7 +14,7 @@ etc.
 """
 
 import logging
-from collections import Counter
+from collections import Counter, defaultdict
 from copy import deepcopy
 import torch
 from tqdm import tqdm
@@ -235,6 +235,7 @@ def compute_prec_rec_per_class(gt_instances, pred_instances):
 def eval_prec_rec_per_class(
     gt_instances, pred_instances, conf_threshold=0.7, iou_threshold=0.5
 ):
+
     gt_instances, pred_instances = prepare_for_eval(
         gt_instances, pred_instances
     )
@@ -402,7 +403,14 @@ def eval_optimal_F_score_per_class(gt_instances, pred_instances, conf_levels):
     return best_fs, optimal_thresholds
 
 
-def compute_COCO_mAP(prec, rec):
+def compute_AUC_prec_per_class(prec, rec):
+    """
+    Computes area under (precision-recall) curve for each category
+
+    Detailed description of the process:
+    https://medium.com/@jonathan_hui/map-mean-average-precision-for-object-detection-45c121a31173
+    """
+
     # extract the measurement points
     iou_levels, category_ids = set(), set()
     for iou_threshold, category_id in prec.keys():
@@ -414,6 +422,7 @@ def compute_COCO_mAP(prec, rec):
     category_ids = sorted(list(category_ids))
 
     # organize scores into tensor
+    # Needs discussion: category_id should come first as index *if present*
     prec_tensor = torch.zeros(len(iou_levels), len(category_ids))
     rec_tensor = torch.zeros(len(iou_levels), len(category_ids))
     for i, iou_threshold in enumerate(iou_levels):
@@ -429,13 +438,45 @@ def compute_COCO_mAP(prec, rec):
         force_decreasing_sequence_inplace(prec_tensor[:, j])
 
     # compute area under curve
-    area = torch.trapz(prec, rec)
+    # Note: dim0=IOU thresholds, dim1=categories
+    area_tensor = torch.trapz(prec_tensor, rec_tensor, dim=0)
+    # recall was used as x, but since it is a decreasing sequence
+    # trapz will return the negative value assigned
+    area_tensor *= -1
+    import pdb; pdb.set_trace()
 
+
+    avg_prec_per_class = {}
+    for j, category_id in enumerate(category_ids):
+        avg_prec_per_class[category_id] = area_tensor[j].item()
+
+    return avg_prec_per_class
 
 @init_eval
-def eval_COCO_mAP(gt_instances, pred_instances, conf_threshold, iou_levels):
+def eval_AUC_prec_per_class(
+    gt_instances, pred_instances, conf_threshold, iou_levels
+):
     prec, rec = eval_prec_rec_per_class_at_iou_levels(
         gt_instances, pred_instances, conf_threshold, iou_levels
     )
-    # TODO: do the monotonity force and AUC per class
-    assert False
+
+    avg_prec_per_class = compute_AUC_avg_precision_per_class(prec, rec)
+    return avg_prec_per_class
+
+
+@init_eval
+def eval_mean_avg_prec_per_class(
+    gt_instances, pred_instances, conf_threshold, iou_levels
+):
+    prec, _ = eval_prec_rec_per_class_at_iou_levels(
+        gt_instances, pred_instances, conf_threshold, iou_levels
+    )
+
+    # Accumulate precision per class
+    avg_prec_per_class = defaultdict(lambda: 0)
+
+    for iou_threshold, category_id in prec.keys():
+        prec_at_iou = prec[iou_threshold, category_id]
+        avg_prec_per_class[category_id] += prec_at_iou / len(iou_levels)
+
+    return avg_prec_per_class
